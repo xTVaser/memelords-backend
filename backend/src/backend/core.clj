@@ -3,6 +3,7 @@
    [io.netty.handler.ssl SslContextBuilder])
   (:require
    [compojure.core :as compojure :refer [GET POST]]
+   [buddy.sign.jwt :as jwt]
    [ring.middleware.params :as params]
    [compojure.route :as route]
    [compojure.response :refer [Renderable]]
@@ -14,6 +15,28 @@
    [clojure.java.io :refer [file]]))
 
 ; http://aleph.io/examples/literate.html taken from here as a starting point
+
+; authentication
+; potentially could add a time-to-live but not critical
+; have a user-id that we could check for banning purposes
+
+(def jwt-secret (or (System/getenv "JWT_SECRET") "password123"))
+
+(defn login-handler
+  ""
+  [req]
+  ; TODO ensure username and password were passed in
+  (let [username (-> req (:params) (get "username"))
+        password (-> req (:params) (get "password"))]
+    ; TODO check db for ban list
+    ; TODO Validate in DB
+    {:status 200
+     :headers {"content-type" "text/plain"}
+     :body (jwt/sign {:username username
+                      :scopes ["post-memes" "comment" "moderate" "root"]}
+                     jwt-secret)}))
+
+;(jwt/unsign jwt "secret")
 
 (defn hello-world-handler
   "A basic Ring handler which immediately returns 'hello world'"
@@ -34,7 +57,7 @@
   [req]
   {:status 200
    :headers {"content-type" "text/plain"}
-   :body (str "meme id " (-> req (:params) (:id)))})
+   :body (str "meme id " (-> req (:route-params) (:id)) req)})
 
 ;; Compojure will normally dereference deferreds and return the realized value.
 ;; Unfortunately, this blocks the thread. Since Aleph can accept the unrealized
@@ -56,6 +79,7 @@
   (params/wrap-params
    (compojure/routes
     (GET "/hello"                       [] hello-world-handler)
+    (GET "/login"                       [] login-handler)
     (GET "/memes"                       [] memes-handler)
     (GET "/memes/:id"                   [id] specific-meme-handler)
     (GET "/memes/:id/comments"          [id] memes-handler) ; probably want a pagination URL parameter (varaible?).
