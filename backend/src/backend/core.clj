@@ -63,14 +63,24 @@
   [req]
   ; TODO ensure username and password were passed in
   (let [username (-> req (:params) (get "username"))
-        password (-> req (:params) (get "password"))]
-    ; TODO check db for ban list
-    ; TODO Validate in DB
-    {:status 200
-     :headers {"content-type" "application/json"}
-     :body {:jwt (jwt/sign {:username username
-                      :scopes ["post-memes" "comment" "moderate" "root"]}
-                     jwt-secret)}}))
+        password (-> req (:params) (get "password"))
+        check-db (read {:kind "user" :id username})]
+    (if (some? check-db)
+      (if (hashers/check password (get check-db "password"))
+        {:status 200
+         :headers {"content-type" "application/json"}
+         :body {:jwt (jwt/sign {:username username
+                                :scopes (get check-db "scopes")}
+                               jwt-secret)
+                :message "User successfully signed in"}}
+        ;; TODO this can be greatly minified
+        {:status 503
+         :headers {"content-type" "application/json"}
+         :body {:error "Invalid credentials"}})
+      ; else
+      {:status 503
+       :headers {"content-type" "application/json"}
+       :body {:error "User does not exist"}})))
 
 (def default-scopes ["view-memes" "post-memes" "comment"])
 
@@ -84,19 +94,17 @@
     ; TODO ensure username and password are present in the case of a bad API call from frontend doods
     (if (nil? check-db)
       (do
-        (write! {:kind "user" :id username} {"password" password-hash "scopes" default-scopes})
+        (write! {:kind "user" :id username} {"password" (str "\"" password-hash "\"") "scopes" default-scopes})
         {:status 200
          :headers {"content-type" "application/json"}
-         :body (jwt/sign {:username username
-                          :scopes default-scopes}
-                         jwt-secret)})
+         :body {:jwt (jwt/sign {:username username
+                                :scopes default-scopes}
+                               jwt-secret)
+                :message "User successfully registered"}})
       ; else
       {:status 500
        :headers {"content-type" "application/json"}
        :body {:error "Username already taken"}})))
-
-
-
 
 ;(jwt/unsign jwt "secret")
 
@@ -129,20 +137,11 @@
   manifold.deferred.IDeferred
   (render [d _] d))
 
-;; This handler defines a set of endpoints via Compojure's `routes` macro.  Notice that above
-;; we've added the `GET` macro via `:refer` so it doesn't have to be qualified.  We wrap the
-;; result in `ring.middleware.params/wrap-params` so that we can get the `count` parameter in
-;; `streaming-numbers-handler`.
-;;
-;; Notice that at the bottom we define a default `compojure.route/not-found` handler, which
-;; will return a `404` status.  If we don't do this, a call to a URI we don't recognize will
-;; return a `nil` response, which will cause Aleph to log an error.
 (def handler
   (wrap-json-response (params/wrap-params
                        (compojure/routes
-                        (GET "/hello"                       [] hello-world-handler)
                         (GET "/register"                    [] register-handler)
-                        (GET "/resetpassword"               [] hello-world-handler)
+                        (GET "/resetpassword"               [] hello-world-handler) ; TODO not implemented yet
                         (GET "/login"                       [] login-handler)
                         (GET "/memes"                       [] memes-handler)
                         (GET "/memes/:id"                   [id] specific-meme-handler)
