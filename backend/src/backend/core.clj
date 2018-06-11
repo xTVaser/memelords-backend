@@ -1,10 +1,13 @@
 (ns backend.core
   (:import
-   [io.netty.handler.ssl SslContextBuilder])
+   [io.netty.handler.ssl SslContextBuilder]
+   [com.google.cloud.datastore Datastore DatastoreOptions Entity Key])
   (:require
    [compojure.core :as compojure :refer [GET POST]]
+   [buddy.hashers :as hashers]
    [buddy.sign.jwt :as jwt]
    [ring.middleware.params :as params]
+   [ring.middleware.json :refer [wrap-json-response]]
    [compojure.route :as route]
    [compojure.response :refer [Renderable]]
    [aleph.http :as http]
@@ -20,6 +23,39 @@
 ; potentially could add a time-to-live but not critical
 ; have a user-id that we could check for banning purposes
 
+
+; Will have to customize indexing rules as indexing forbids length
+
+;$env:GOOGLE_APPLICATION_CREDENTIALS= "F:\Repos\memelords\backend\datastore-creds.json"
+(def ^:private datastore (.getService (DatastoreOptions/getDefaultInstance)))
+
+(defn ^:private create-key [key kind]
+  (let [factory (.newKeyFactory datastore)]
+    (doto factory
+      (.setKind kind))
+    (.newKey factory key)))
+
+(defn ^:private create-entity [key m]
+  (let [builder (Entity/newBuilder key)]
+    (doseq [[key value] m]
+      (.set builder key (str value)))
+    (.build builder)))
+
+;(write! {:kind "test" :id 123} {"test" "123"})
+(defn write! [{:keys [kind id]} m]
+  (let [key (create-key id kind)
+        entity (create-entity key m)]
+    (.put datastore entity)))
+
+(defn read [{:keys [kind id]}]
+  (let [key (create-key id kind)
+        entity (.get datastore key)]
+    (when-not (nil? entity)
+      (into {}
+            (map (fn [key]
+                   [key (read-string (.getString entity key))]))
+            (.getNames entity)))))
+
 (def jwt-secret (or (System/getenv "JWT_SECRET") "password123"))
 
 (defn login-handler
@@ -31,10 +67,36 @@
     ; TODO check db for ban list
     ; TODO Validate in DB
     {:status 200
-     :headers {"content-type" "text/plain"}
-     :body (jwt/sign {:username username
+     :headers {"content-type" "application/json"}
+     :body {:jwt (jwt/sign {:username username
                       :scopes ["post-memes" "comment" "moderate" "root"]}
-                     jwt-secret)}))
+                     jwt-secret)}}))
+
+(def default-scopes ["view-memes" "post-memes" "comment"])
+
+(defn register-handler
+  ""
+  [req]
+  (let [username (-> req (:params) (get "username"))
+        password (-> req (:params) (get "password"))
+        password-hash (hashers/derive password)
+        check-db (read {:kind "user" :id username})]
+    ; TODO ensure username and password are present in the case of a bad API call from frontend doods
+    (if (nil? check-db)
+      (do
+        (write! {:kind "user" :id username} {"password" password-hash "scopes" default-scopes})
+        {:status 200
+         :headers {"content-type" "application/json"}
+         :body (jwt/sign {:username username
+                          :scopes default-scopes}
+                         jwt-secret)})
+      ; else
+      {:status 500
+       :headers {"content-type" "application/json"}
+       :body {:error "Username already taken"}})))
+
+
+
 
 ;(jwt/unsign jwt "secret")
 
@@ -76,16 +138,21 @@
 ;; will return a `404` status.  If we don't do this, a call to a URI we don't recognize will
 ;; return a `nil` response, which will cause Aleph to log an error.
 (def handler
-  (params/wrap-params
-   (compojure/routes
-    (GET "/hello"                       [] hello-world-handler)
-    (GET "/login"                       [] login-handler)
-    (GET "/memes"                       [] memes-handler)
-    (GET "/memes/:id"                   [id] specific-meme-handler)
-    (GET "/memes/:id/comments"          [id] memes-handler) ; probably want a pagination URL parameter (varaible?).
-    (POST "/memes"                      [] hello-world-handler)
-    (POST "/memes/:id/comments"         [id] hello-world-handler)
-    (route/not-found "No such page."))))
+  (wrap-json-response (params/wrap-params
+                       (compojure/routes
+                        (GET "/hello"                       [] hello-world-handler)
+                        (GET "/register"                    [] register-handler)
+                        (GET "/resetpassword"               [] hello-world-handler)
+                        (GET "/login"                       [] login-handler)
+                        (GET "/memes"                       [] memes-handler)
+                        (GET "/memes/:id"                   [id] specific-meme-handler)
+                        (GET "/memes/:id/comments"          [id] memes-handler) ; probably want a pagination URL parameter (varaible?).
+                        (POST "/memes"                      [] hello-world-handler)
+                        (POST "/memes/:id/comments"         [id] hello-world-handler)
+                        (route/not-found "No such page.")))))
+
+
+
 
 (defn -main [& args]
   (http/start-server handler {:port 10000}))
