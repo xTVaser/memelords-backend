@@ -1,7 +1,7 @@
 (ns backend.core
   (:import
    [io.netty.handler.ssl SslContextBuilder]
-   [com.google.cloud.datastore Datastore DatastoreOptions Entity Key])
+   [com.google.cloud.datastore Datastore DatastoreOptions Entity Key StringValue])
   (:require
    [compojure.core :as compojure :refer [GET POST]]
    [buddy.hashers :as hashers]
@@ -24,8 +24,7 @@
 ; have a user-id that we could check for banning purposes
 
 
-; Will have to customize indexing rules as indexing forbids length
-
+; Will have to customize indexing rules as indexing forbids length (unless we limit length)
 ;$env:GOOGLE_APPLICATION_CREDENTIALS= "F:\Repos\memelords\backend\datastore-creds.json"
 (def ^:private datastore (.getService (DatastoreOptions/getDefaultInstance)))
 
@@ -35,15 +34,30 @@
       (.setKind kind))
     (.newKey factory key)))
 
+(defn ^:private auto-gen-key [kind]
+  (let [factory (.newKeyFactory datastore)]
+    (doto factory
+      (.setKind kind))
+    (.newKey factory)))
+
 (defn ^:private create-entity [key m]
   (let [builder (Entity/newBuilder key)]
-    (doseq [[key value] m]
-      (.set builder key (str value)))
+    (doseq [[key args] m]
+      ; TODO disgusting, clean this up
+      (if (:indexed? args)
+        (.set builder key (str (:val args)))
+        (let [string-builder (StringValue/newBuilder (str (:val args)))]
+          (.setExcludeFromIndexes string-builder true)
+          (.set builder key (.build string-builder)))))
     (.build builder)))
 
-;(write! {:kind "test" :id 123} {"test" "123"})
 (defn write! [{:keys [kind id]} m]
   (let [key (create-key id kind)
+        entity (create-entity key m)]
+    (.put datastore entity)))
+
+(defn write-genid! [{:keys [kind]} m]
+  (let [key (auto-gen-key kind)
         entity (create-entity key m)]
     (.put datastore entity)))
 
@@ -94,7 +108,8 @@
     ; TODO ensure username and password are present in the case of a bad API call from frontend doods
     (if (nil? check-db)
       (do
-        (write! {:kind "user" :id username} {"password" (str "\"" password-hash "\"") "scopes" default-scopes})
+        (write! {:kind "user" :id username} {"password" {:val (str "\"" password-hash "\""), :indexed? false}
+                                             "scopes"   {:val default-scopes, :indexed? true}})
         {:status 200
          :headers {"content-type" "application/json"}
          :body {:jwt (jwt/sign {:username username
@@ -106,7 +121,25 @@
        :headers {"content-type" "application/json"}
        :body {:error "Username already taken"}})))
 
-;(jwt/unsign jwt "secret")
+
+; (jwt/unsign jwt "secret")
+; TODO not currently checking JWT
+(defn publish-meme-handler
+  [req]
+  (let [title (-> req (:params) (get "title"))
+        caption (-> req (:params) (get "caption"))
+        link (-> req (:params) (get "link"))]
+    ; TODO wrap in try-catches
+    ; comments must not be indexed!
+    (let [result (write-genid! {:kind "meme"} {"title" {:val title :indexed? true},
+                                               "caption" {:val caption :indexed? false},
+                                               "link" {:val link :indexed? false},
+                                               "comments" {:val [] :indexed? false},
+                                               "timestamp" {:val (new java.util.Date) :indexed? true}})]
+      {:status 200
+       :headers {"content-type" "application/json"}
+       :body {:message "Meme published successfully"
+              :id (.getId (.getKey result))}})))
 
 (defn hello-world-handler
   "A basic Ring handler which immediately returns 'hello world'"
@@ -138,26 +171,26 @@
   (render [d _] d))
 
 (def handler
-  (wrap-json-response (params/wrap-params
-                       (compojure/routes
-                        (GET "/register"                    [] register-handler)
-                        (GET "/resetpassword"               [] hello-world-handler) ; TODO not implemented yet
-                        (GET "/login"                       [] login-handler)
-                        (GET "/memes"                       [] memes-handler)
-                        (GET "/memes/:id"                   [id] specific-meme-handler)
-                        (GET "/memes/:id/comments"          [id] memes-handler) ; probably want a pagination URL parameter (varaible?).
-                        (POST "/memes"                      [] hello-world-handler)
-                        (POST "/memes/:id/comments"         [id] hello-world-handler)
-                        (route/not-found "No such page.")))))
-
-
-
+  ;; TODO - thread macro this
+  (wrap-json-response
+   (params/wrap-params
+    (compojure/routes
+     (GET  "/resetpassword"                        []                    hello-world-handler) ; TODO not implemented yet
+     (GET  "/login"                                []                    login-handler)
+     (GET  "/memes"                                []                    memes-handler)
+     (GET  "/memes/:id"                            [id]                  specific-meme-handler)
+     (GET  "/memes/:id/comments"                   [id]                  memes-handler) ; probably want a pagination URL parameter (varaible?).
+     (POST "/register"                             []                    register-handler)
+     (POST "/memes"                                []                    publish-meme-handler)
+     (POST "/memes/:id/comments"                   [id]                  hello-world-handler)
+     ; TODO simplify no replies at this time (POST "/memes/:id/comments/:commentId/reply"  [meme-id, comment-id] hello-world-handler)
+     (route/not-found "No such page.")))))
 
 (defn -main [& args]
   (http/start-server handler {:port 10000}))
 
 
-;; TODO
+;; TODO TLS
 
 ; ;; ### TLS client certificate authentication
 
