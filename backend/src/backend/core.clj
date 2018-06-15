@@ -1,8 +1,10 @@
 (ns backend.core
   (:import
    [io.netty.handler.ssl SslContextBuilder]
-   [com.google.cloud.datastore Datastore DatastoreOptions Entity Key StringValue])
+   [com.google.cloud.datastore Datastore DatastoreOptions Entity EntityQuery Key StringValue TimestampValue Query Cursor StructuredQuery$OrderBy]
+   [com.google.cloud Timestamp])
   (:require
+   [clojure.string :as string]
    [compojure.core :as compojure :refer [GET POST]]
    [buddy.hashers :as hashers]
    [buddy.sign.jwt :as jwt]
@@ -25,7 +27,7 @@
 
 
 ; Will have to customize indexing rules as indexing forbids length (unless we limit length)
-;$env:GOOGLE_APPLICATION_CREDENTIALS= "F:\Repos\memelords\backend\datastore-creds.json"
+;$env:GOOGLE_APPLICATION_CREDENTIALS="F:\Repos\memelords\backend\datastore-creds.json"
 (def ^:private datastore (.getService (DatastoreOptions/getDefaultInstance)))
 
 (defn ^:private create-key [key kind]
@@ -49,6 +51,9 @@
         (let [string-builder (StringValue/newBuilder (str (:val args)))]
           (.setExcludeFromIndexes string-builder true)
           (.set builder key (.build string-builder)))))
+    ; everything gets timestamped
+    (let [timestamp-builder (TimestampValue/newBuilder (Timestamp/now))]
+      (.set builder "timestamp" (.build timestamp-builder)))
     (.build builder)))
 
 (defn write! [{:keys [kind id]} m]
@@ -130,12 +135,10 @@
         caption (-> req (:params) (get "caption"))
         link (-> req (:params) (get "link"))]
     ; TODO wrap in try-catches
-    ; comments must not be indexed!
-    (let [result (write-genid! {:kind "meme"} {"title" {:val title :indexed? true},
-                                               "caption" {:val caption :indexed? false},
-                                               "link" {:val link :indexed? false},
-                                               "comments" {:val [] :indexed? false},
-                                               "timestamp" {:val (new java.util.Date) :indexed? true}})]
+    (let [result (write-genid! {:kind "meme"} {"title" {:val title :indexed? true}
+                                               "caption" {:val caption :indexed? false}
+                                               "link" {:val link :indexed? false}
+                                               "comments" {:val [] :indexed? false}})]
       {:status 200
        :headers {"content-type" "application/json"}
        :body {:message "Meme published successfully"
@@ -148,19 +151,50 @@
    :headers {"content-type" "text/plain"}
    :body "hello world!"})
 
+(def page-size 25)
+
+(defn read-with-cursor
+  [cursor-param, kind, sort-key ascending]
+  (let [order-by (if ascending
+                   (StructuredQuery$OrderBy/asc sort-key)
+                   (StructuredQuery$OrderBy/desc sort-key))
+        query (.setOrderBy (.setLimit (.setKind (Query/newEntityQueryBuilder) kind) (int page-size)) order-by (make-array StructuredQuery$OrderBy 0))] ; https://dev.clojure.org/jira/browse/CLJ-440
+    ; try catch incase invalid cursor passed in
+    (when (some? cursor-param)
+      (.setStartCursor query (Cursor/fromUrlSafe cursor-param)))
+    (let [raw-results (.run datastore (.build query))
+          results (loop [result []] (if (.hasNext raw-results) (recur (conj result (.next raw-results))) result))]
+      {:entities results
+       :next-cursor (if (> (count results) 0)
+                      (.toUrlSafe (.getCursorAfter raw-results))
+                      nil)})))
+
+(defn meme-to-edn
+  [m]
+  {:id (.getId (.getKey m))
+   :title (.getString m "title")
+   :caption (.getString m "caption")
+   :link (.getString m "link")
+   :comments (read-string (.getString m "comments"))
+   :timestamp (str (.getTimestamp m "timestamp"))})
+
 (defn memes-handler
   "Memes Handler"
-  [req]
-  {:status 200
-   :headers {"content-type" "text/plain"}
-   :body (str "memes" req)})
-
-(defn specific-meme-handler
-  "Memes Handler"
-  [req]
-  {:status 200
-   :headers {"content-type" "text/plain"}
-   :body (str "meme id " (-> req (:route-params) (:id)) req)})
+  ([req]
+   ; look for next page number
+   (let [params (:params req)
+         next-page (get params "next-page")
+         sort-direction (and (contains? params "sort") (= (string/lower-case (get params "sort")) "desc"))
+         results (read-with-cursor next-page "meme" "timestamp" sort-direction)]
+     {:status 200
+      :headers {"content-type" "text/plain"}
+      :body {:memes (map meme-to-edn (:entities results))
+             :next-page (:next-cursor results)}}))
+  ([req id]
+   {:status 200
+    :headers {"content-type" "text/plain"}
+    ; TODO doesnt currently handle if it finds nothing nicely
+    :body (read {:kind "meme" :id id})}))
 
 ;; Compojure will normally dereference deferreds and return the realized value.
 ;; Unfortunately, this blocks the thread. Since Aleph can accept the unrealized
@@ -178,11 +212,11 @@
      (GET  "/resetpassword"                        []                    hello-world-handler) ; TODO not implemented yet
      (GET  "/login"                                []                    login-handler)
      (GET  "/memes"                                []                    memes-handler)
-     (GET  "/memes/:id"                            [id]                  specific-meme-handler)
-     (GET  "/memes/:id/comments"                   [id]                  memes-handler) ; probably want a pagination URL parameter (varaible?).
+     (GET  "/memes/:id"                            [id :as req]          (memes-handler req id))
+     (GET  "/memes/:id/comments"                   [id :as req]          hello-world-handler) ; probably want a pagination URL parameter (varaible?). 
      (POST "/register"                             []                    register-handler)
      (POST "/memes"                                []                    publish-meme-handler)
-     (POST "/memes/:id/comments"                   [id]                  hello-world-handler)
+     (POST "/memes/:id/comments"                   [id :as req]          hello-world-handler)
      ; TODO simplify no replies at this time (POST "/memes/:id/comments/:commentId/reply"  [meme-id, comment-id] hello-world-handler)
      (route/not-found "No such page.")))))
 
