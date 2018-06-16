@@ -253,10 +253,10 @@
                         (wrap-json-response))
                     (route/not-found "Page Not Found")))
 
-(defonce server (http/start-server app {:port 10000}))
+(defonce server (http/start-server app {:port 80}))
 
 (defn -main [& args]
-  (println "Starting up Server on Port 10000...")
+  (println "Starting up Server on Port 80...")
   (netty/wait-for-close server))
 
 
