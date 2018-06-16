@@ -267,11 +267,9 @@
                         (wrap-json-response))
                     (route/not-found "Page Not Found")))
 
-(defonce server (http/start-server app {:port 80}))
-
 (defn -main [& args]
   (println "Starting up Server on Port 80...")
-  (when-not *compile-files* (netty/wait-for-close server)))
+  (when-not *compile-files* (netty/wait-for-close (http/start-server app {:port 80})))) ;https://stackoverflow.com/questions/32288195/why-lein-uberjar-evaluates-variables-defined-with-def
 
 
 ;; TODO TLS
