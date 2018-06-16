@@ -1,4 +1,5 @@
 (ns backend.core
+  (:gen-class)
   (:import
    [io.netty.handler.ssl SslContextBuilder]
    [com.google.cloud.datastore Datastore DatastoreOptions Entity EntityQuery Key StringValue TimestampValue Query Cursor StructuredQuery$OrderBy]
@@ -252,11 +253,11 @@
                         (wrap-json-response))
                     (route/not-found "Page Not Found")))
 
-(defonce start-server
-   (netty/wait-for-close (http/start-server app {:port 10000})))
+(defonce server (http/start-server app {:port 10000}))
 
 (defn -main [& args]
-  (println "hey"))
+  (println "Starting up Server on Port 10000...")
+  (netty/wait-for-close server))
 
 
 ;; TODO TLS
