@@ -1,1 +1,0 @@
-web: java $JVM_OPTS -cp backend/target/backend-*-standalone.jar backend.core -m memelords.web
