@@ -1,1 +1,1 @@
-web: java -Dhttp.port=${PORT} ${JAVA_OPTS} -cp target/uberjar/memelords-backend.jar clojure.main -m backend.core
+web: java -Dhttp.port=$PORT ${JAVA_OPTS} -cp target/uberjar/memelords-backend.jar clojure.main -m backend.core
