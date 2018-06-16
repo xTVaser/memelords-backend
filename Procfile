@@ -1,0 +1,1 @@
+web: java $JVM_OPTS -cp backend/target/backend-*-standalone.jar clojure.main -m memelords.web
