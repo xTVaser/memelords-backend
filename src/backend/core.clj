@@ -271,8 +271,7 @@
 
 (defn -main [& args]
   (println "Starting up Server on Port 80...")
-  (netty/wait-for-close server)
-)
+  (when-not *compile-files* (netty/wait-for-close server)))
 
 
 ;; TODO TLS
