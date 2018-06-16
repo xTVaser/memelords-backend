@@ -1,1 +1,1 @@
-web: java $JVM_OPTS -cp target/memelords-backend.jar -Dhttp.port=80 clojure.main -m backend.core
+web: java -Dhttp.port=${PORT} ${JAVA_OPTS} -cp target/memelords-backend.jar clojure.main -m backend.core
