@@ -268,8 +268,8 @@
                     (route/not-found "Page Not Found")))
 
 (defn -main [& args]
-  (println "Starting up Server on Port 80...")
-  (when-not *compile-files* (netty/wait-for-close (http/start-server app {:port 80})))) ;https://stackoverflow.com/questions/32288195/why-lein-uberjar-evaluates-variables-defined-with-def
+  (println (str "Starting up Server on Port " (System/getenv "PORT") " chosen by Heroku.  Will be publically bound to 80"))
+  (when-not *compile-files* (netty/wait-for-close (http/start-server app {:port (Integer/parseInt (System/getenv "PORT"))})))) ;https://stackoverflow.com/questions/32288195/why-lein-uberjar-evaluates-variables-defined-with-def
 
 
 ;; TODO TLS
