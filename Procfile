@@ -1,0 +1,1 @@
+web: java $JVM_OPTS -cp target/memelords-backend.jar clojure.main -m backend.core
