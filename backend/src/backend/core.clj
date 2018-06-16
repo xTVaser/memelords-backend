@@ -5,7 +5,7 @@
    [com.google.cloud Timestamp])
   (:require
    [clojure.string :as string]
-   [compojure.core :as compojure :refer [GET POST]]
+   [compojure.core :as compojure :refer [GET POST defroutes wrap-routes]]
    [buddy.hashers :as hashers]
    [buddy.sign.jwt :as jwt]
    [ring.middleware.params :as params]
@@ -13,6 +13,7 @@
    [compojure.route :as route]
    [compojure.response :refer [Renderable]]
    [aleph.http :as http]
+   [aleph.netty :as netty]
    [byte-streams :as bs]
    [manifold.stream :as s]
    [manifold.deferred :as d]
@@ -66,7 +67,7 @@
         entity (create-entity key m)]
     (.put datastore entity)))
 
-(defn read [{:keys [kind id]}]
+(defn read-datastore [{:keys [kind id]}]
   (let [key (create-key id kind)
         entity (.get datastore key)]
     (when-not (nil? entity)
@@ -77,13 +78,14 @@
 
 (def jwt-secret (or (System/getenv "JWT_SECRET") "password123"))
 
+; TODO probably want a capctha or something
 (defn login-handler
   ""
   [req]
   ; TODO ensure username and password were passed in
   (let [username (-> req (:params) (get "username"))
         password (-> req (:params) (get "password"))
-        check-db (read {:kind "user" :id username})]
+        check-db (read-datastore {:kind "user" :id username})]
     (if (some? check-db)
       (if (hashers/check password (get check-db "password"))
         {:status 200
@@ -109,7 +111,7 @@
   (let [username (-> req (:params) (get "username"))
         password (-> req (:params) (get "password"))
         password-hash (hashers/derive password)
-        check-db (read {:kind "user" :id username})]
+        check-db (read-datastore {:kind "user" :id username})]
     ; TODO ensure username and password are present in the case of a bad API call from frontend doods
     (if (nil? check-db)
       (do
@@ -126,9 +128,7 @@
        :headers {"content-type" "application/json"}
        :body {:error "Username already taken"}})))
 
-
-; (jwt/unsign jwt "secret")
-; TODO not currently checking JWT
+; TODO emmet strip html tags
 (defn publish-meme-handler
   [req]
   (let [title (-> req (:params) (get "title"))
@@ -184,7 +184,7 @@
    ; look for next page number
    (let [params (:params req)
          next-page (get params "next-page")
-         sort-direction (and (contains? params "sort") (= (string/lower-case (get params "sort")) "desc"))
+         sort-direction (and (contains? params "sort") (= (string/lower-case (get params "sort")) "asc"))
          results (read-with-cursor next-page "meme" "timestamp" sort-direction)]
      {:status 200
       :headers {"content-type" "text/plain"}
@@ -194,7 +194,7 @@
    {:status 200
     :headers {"content-type" "text/plain"}
     ; TODO doesnt currently handle if it finds nothing nicely
-    :body (read {:kind "meme" :id id})}))
+    :body (read-datastore {:kind "meme" :id id})}))
 
 ;; Compojure will normally dereference deferreds and return the realized value.
 ;; Unfortunately, this blocks the thread. Since Aleph can accept the unrealized
@@ -204,24 +204,59 @@
   manifold.deferred.IDeferred
   (render [d _] d))
 
-(def handler
-  ;; TODO - thread macro this
-  (wrap-json-response
-   (params/wrap-params
-    (compojure/routes
-     (GET  "/resetpassword"                        []                    hello-world-handler) ; TODO not implemented yet
-     (GET  "/login"                                []                    login-handler)
-     (GET  "/memes"                                []                    memes-handler)
-     (GET  "/memes/:id"                            [id :as req]          (memes-handler req id))
-     (GET  "/memes/:id/comments"                   [id :as req]          hello-world-handler) ; probably want a pagination URL parameter (varaible?). 
-     (POST "/register"                             []                    register-handler)
-     (POST "/memes"                                []                    publish-meme-handler)
-     (POST "/memes/:id/comments"                   [id :as req]          hello-world-handler)
-     ; TODO simplify no replies at this time (POST "/memes/:id/comments/:commentId/reply"  [meme-id, comment-id] hello-world-handler)
-     (route/not-found "No such page.")))))
+; TODO finish proper JWT header stuff - https://stackoverflow.com/a/47157391
+(defn verify-jwt [handler required-scopes]
+  (fn [req]
+    ; If no scopes, then let it through
+    (println req)
+    (println required-scopes)
+    (try
+      (let [token (jwt/unsign (get (:headers req) "authorization") jwt-secret)
+            provided-scopes (into #{} (:scopes token))]
+        (if (clojure.set/subset? (:required-scopes req) provided-scopes)
+          (handler req)
+          {:status 403
+           :headers {"content-type" "text/plain"}
+           :body "Access Denied"}))
+      (catch Exception e
+        (println e)
+        {:status 403
+         :headers {"content-type" "text/plain"}
+         :body "Invalid Credentials"}))))
+
+(defroutes view-routes*
+  (GET  "/memes"                                []             memes-handler)
+  (GET  "/memes/:id"                            [id :as req]   (memes-handler req id)))
+
+(defroutes post-routes*
+  (POST "/memes"                                []             publish-meme-handler)
+  (POST "/memes/:id/comments"                   [id]           hello-world-handler))
+; TODO simplify no replies at this time (POST "/memes/:id/comments/:commentId/reply"  [meme-id, comment-id] hello-world-handler)
+
+(defroutes public-routes*
+  (GET  "/resetpassword"                        []             hello-world-handler) ; TODO not implemented yet
+  (GET  "/login"                                []             login-handler)
+  (POST "/register"                             []             register-handler))
+
+(def app
+  (compojure/routes (-> view-routes*
+                        (params/wrap-params)
+                        (wrap-routes verify-jwt #{"view-memes"})
+                        (wrap-json-response))
+                    (-> post-routes*
+                        (params/wrap-params)
+                        (wrap-routes verify-jwt #{"post-memes"})
+                        (wrap-json-response))
+                    (-> public-routes*
+                        (params/wrap-params)
+                        (wrap-json-response))
+                    (route/not-found "Page Not Found")))
+
+(defonce start-server
+   (netty/wait-for-close (http/start-server app {:port 10000})))
 
 (defn -main [& args]
-  (http/start-server handler {:port 10000}))
+  (println "hey"))
 
 
 ;; TODO TLS
