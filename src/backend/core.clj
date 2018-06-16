@@ -3,6 +3,7 @@
   (:import
    [io.netty.handler.ssl SslContextBuilder]
    [com.google.cloud.datastore Datastore DatastoreOptions Entity EntityQuery Key StringValue TimestampValue Query Cursor StructuredQuery$OrderBy]
+   [com.google.auth.oauth2 ServiceAccountCredentials]
    [com.google.cloud Timestamp])
   (:require
    [clojure.string :as string]
@@ -19,6 +20,7 @@
    [manifold.stream :as s]
    [manifold.deferred :as d]
    [clojure.core.async :as a]
+   [clojure.data.json :as json]
    [clojure.java.io :refer [file]]))
 
 ; http://aleph.io/examples/literate.html taken from here as a starting point
@@ -27,10 +29,22 @@
 ; potentially could add a time-to-live but not critical
 ; have a user-id that we could check for banning purposes
 
+; Local Development - ;$env:GOOGLE_APPLICATION_CREDENTIALS="F:\Repos\memelords\backend\datastore-creds.json"
+(def credentials (json/read-str (System/getenv "GOOGLE_CREDENTIALS")))
 
-; Will have to customize indexing rules as indexing forbids length (unless we limit length)
-;$env:GOOGLE_APPLICATION_CREDENTIALS="F:\Repos\memelords\backend\datastore-creds.json"
-(def ^:private datastore (.getService (DatastoreOptions/getDefaultInstance)))
+(def resolved-creds (ServiceAccountCredentials/fromPkcs8
+                     (get credentials "client_id")
+                     (get credentials "client_email")
+                     (get credentials "private_key")
+                     (get credentials "private_key_id")
+                     nil))
+
+; ; Will have to customize indexing rules as indexing forbids length (unless we limit length)
+(def ^:private datastore (let [builder (DatastoreOptions/newBuilder)]
+  (doto builder
+    (.setCredentials resolved-creds)
+    (.setProjectId (get credentials "project_id")))
+  (.getService (.build builder))))
 
 (defn ^:private create-key [key kind]
   (let [factory (.newKeyFactory datastore)]
@@ -257,7 +271,8 @@
 
 (defn -main [& args]
   (println "Starting up Server on Port 80...")
-  (netty/wait-for-close server))
+  (netty/wait-for-close server)
+)
 
 
 ;; TODO TLS

@@ -13,7 +13,9 @@
                  [ring/ring-json "0.4.0"]
                  [org.clojure/clojure "1.8.0"]
                  [org.clojure/core.async "0.4.474"]
-                 [com.google.cloud/google-cloud-datastore "1.31.0"]]
+                 [org.clojure/data.json "0.2.6"]
+                 [com.google.cloud/google-cloud-datastore "1.31.0"]
+                 [com.google.auth/google-auth-library-oauth2-http "0.9.1"]]
   :main ^:skip-aot backend.core
   :target-path "target/%s"
   :profiles {:uberjar {:aot :all}})
