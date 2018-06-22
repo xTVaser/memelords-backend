@@ -50,6 +50,11 @@
 ; TODO - Make this work locally without having to comment out code
 ; (def ^:private datastore (.getService (DatastoreOptions/getDefaultInstance)))
 
+(defn add-cors [map]
+  (merge map {"Access-Control-Allow-Headers", "Content-Type, Authorization, Accept"
+              "Access-Control-Allow-Methods", "OPTIONS, GET, POST"
+              "Access-Control-Allow-Origin", "*"}))
+
 (defn ^:private create-key [key kind]
   (let [factory (.newKeyFactory datastore)]
     (doto factory
@@ -109,7 +114,7 @@
     (if (some? check-db)
       (if (hashers/check password (get check-db "password"))
         {:status 200
-         :headers {"content-type" "application/json"}
+         :headers (add-cors {"content-type" "application/json"})
          :body {:jwt (str "Bearer " (jwt/sign {:username username
                                                :scopes (get check-db "scopes")
                                                :created (new java.util.Date)}
@@ -117,11 +122,11 @@
                 :message "User successfully signed in"}}
         ;; TODO this can be greatly minified
         {:status 403
-         :headers {"content-type" "application/json"}
+         :headers (add-cors {"content-type" "application/json"})
          :body {:error "Invalid credentials"}})
       ; else
       {:status 403
-       :headers {"content-type" "application/json"}
+       :headers (add-cors {"content-type" "application/json"})
        :body {:error "User does not exist"}})))
 
 (def default-scopes ["view-memes" "post-memes" "comment"])
@@ -139,7 +144,7 @@
         (write! {:kind "user" :id username} {"password" {:val (str "\"" password-hash "\""), :indexed? false}
                                              "scopes"   {:val default-scopes, :indexed? true}})
         {:status 200
-         :headers {"content-type" "application/json"}
+         :headers (add-cors {"content-type" "application/json"})
          :body {:jwt (str "Bearer " (jwt/sign {:username username
                                                :scopes default-scopes
                                                :created (new java.util.Date)}
@@ -147,7 +152,7 @@
                 :message "User successfully registered"}})
       ; else
       {:status 400
-       :headers {"content-type" "application/json"}
+       :headers (add-cors {"content-type" "application/json"})
        :body {:error "Username already taken"}})))
 
 ; TODO emmet strip html tags
@@ -162,7 +167,7 @@
                                                "link" {:val link :indexed? false}
                                                "comments" {:val [] :indexed? false}})]
       {:status 200
-       :headers {"content-type" "application/json"}
+       :headers (add-cors {"content-type" "application/json"})
        :body {:message "Meme published successfully"
               :id (.getId (.getKey result))}})))
 
@@ -170,7 +175,7 @@
   "A basic Ring handler which immediately returns 'hello world'"
   [req]
   {:status 200
-   :headers {"content-type" "text/plain"}
+   :headers (add-cors {"content-type" "text/plain"})
    :body "hello world!"})
 
 (def page-size 25)
@@ -209,12 +214,12 @@
          sort-direction (and (contains? params "sort") (= (string/lower-case (get params "sort")) "asc"))
          results (read-with-cursor next-page "meme" "timestamp" sort-direction)]
      {:status 200
-      :headers {"content-type" "text/plain"}
+      :headers (add-cors {"content-type" "application/json"})
       :body {:memes (map meme-to-edn (:entities results))
              :next-page (:next-cursor results)}}))
   ([req id]
    {:status 200
-    :headers {"content-type" "text/plain"}
+    :headers (add-cors {"content-type" "application/json"})
     ; TODO doesnt currently handle if it finds nothing nicely
     :body (read-datastore {:kind "meme" :id id})}))
 
@@ -237,12 +242,12 @@
         (if (clojure.set/subset? (:required-scopes req) provided-scopes)
           (handler req)
           {:status 403
-           :headers {"content-type" "text/plain"}
+           :headers (add-cors {"content-type" "application/json"})
            :body "Access Denied"}))
       (catch Exception e
         (println e)
         {:status 401
-         :headers {"content-type" "text/plain"}
+         :headers (add-cors {"content-type" "application/json"})
          :body "Invalid Credentials"}))))
 
 (defroutes view-routes*
