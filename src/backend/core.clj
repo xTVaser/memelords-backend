@@ -29,7 +29,6 @@
 ; potentially could add a time-to-live but not critical
 ; have a user-id that we could check for banning purposes
 
-; Local Development - ;$env:GOOGLE_APPLICATION_CREDENTIALS="F:\Repos\memelords\backend\datastore-creds.json"
 (def credentials (json/read-str (System/getenv "GOOGLE_CREDENTIALS")))
 
 (def resolved-creds (ServiceAccountCredentials/fromPkcs8
@@ -41,10 +40,15 @@
 
 ; ; Will have to customize indexing rules as indexing forbids length (unless we limit length)
 (def ^:private datastore (let [builder (DatastoreOptions/newBuilder)]
-  (doto builder
-    (.setCredentials resolved-creds)
-    (.setProjectId (get credentials "project_id")))
-  (.getService (.build builder))))
+                           (doto builder
+                             (.setCredentials resolved-creds)
+                             (.setProjectId (get credentials "project_id")))
+                           (.getService (.build builder))))
+
+; Local Development - ;$env:GOOGLE_APPLICATION_CREDENTIALS="F:\Repos\memelords-backend\datastore-creds.json"
+; $env:PORT=80
+; TODO - Make this work locally without having to comment out code
+; (def ^:private datastore (.getService (DatastoreOptions/getDefaultInstance)))
 
 (defn ^:private create-key [key kind]
   (let [factory (.newKeyFactory datastore)]
@@ -67,7 +71,6 @@
         (let [string-builder (StringValue/newBuilder (str (:val args)))]
           (.setExcludeFromIndexes string-builder true)
           (.set builder key (.build string-builder)))))
-    ; everything gets timestamped
     (let [timestamp-builder (TimestampValue/newBuilder (Timestamp/now))]
       (.set builder "timestamp" (.build timestamp-builder)))
     (.build builder)))
@@ -105,16 +108,17 @@
       (if (hashers/check password (get check-db "password"))
         {:status 200
          :headers {"content-type" "application/json"}
-         :body {:jwt (jwt/sign {:username username
-                                :scopes (get check-db "scopes")}
-                               jwt-secret)
+         :body {:jwt (str "Bearer " (jwt/sign {:username username
+                                               :scopes (get check-db "scopes")
+                                               :created (new java.util.Date)}
+                                              jwt-secret))
                 :message "User successfully signed in"}}
         ;; TODO this can be greatly minified
-        {:status 503
+        {:status 403
          :headers {"content-type" "application/json"}
          :body {:error "Invalid credentials"}})
       ; else
-      {:status 503
+      {:status 403
        :headers {"content-type" "application/json"}
        :body {:error "User does not exist"}})))
 
@@ -134,12 +138,12 @@
                                              "scopes"   {:val default-scopes, :indexed? true}})
         {:status 200
          :headers {"content-type" "application/json"}
-         :body {:jwt (jwt/sign {:username username
-                                :scopes default-scopes}
-                               jwt-secret)
+         :body {:jwt (str "Bearer " (jwt/sign {:username username
+                                               :scopes default-scopes}
+                                              jwt-secret))
                 :message "User successfully registered"}})
       ; else
-      {:status 500
+      {:status 400
        :headers {"content-type" "application/json"}
        :body {:error "Username already taken"}})))
 
@@ -219,14 +223,13 @@
   manifold.deferred.IDeferred
   (render [d _] d))
 
-; TODO finish proper JWT header stuff - https://stackoverflow.com/a/47157391
 (defn verify-jwt [handler required-scopes]
   (fn [req]
     ; If no scopes, then let it through
     (println req)
     (println required-scopes)
     (try
-      (let [token (jwt/unsign (get (:headers req) "authorization") jwt-secret)
+      (let [token (jwt/unsign (subs (get (:headers req) "authorization") 7) jwt-secret)
             provided-scopes (into #{} (:scopes token))]
         (if (clojure.set/subset? (:required-scopes req) provided-scopes)
           (handler req)
@@ -235,7 +238,7 @@
            :body "Access Denied"}))
       (catch Exception e
         (println e)
-        {:status 403
+        {:status 401
          :headers {"content-type" "text/plain"}
          :body "Invalid Credentials"}))))
 
