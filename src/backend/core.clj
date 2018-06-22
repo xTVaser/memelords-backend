@@ -91,7 +91,9 @@
     (when-not (nil? entity)
       (into {}
             (map (fn [key]
-                   [key (read-string (.getString entity key))]))
+                   (if (= key "timestamp")
+                     [key (.getTimestamp entity key)]
+                     [key (read-string (.getString entity key))])))
             (.getNames entity)))))
 
 (def jwt-secret (or (System/getenv "JWT_SECRET") "password123"))
@@ -139,7 +141,8 @@
         {:status 200
          :headers {"content-type" "application/json"}
          :body {:jwt (str "Bearer " (jwt/sign {:username username
-                                               :scopes default-scopes}
+                                               :scopes default-scopes
+                                               :created (new java.util.Date)}
                                               jwt-secret))
                 :message "User successfully registered"}})
       ; else
