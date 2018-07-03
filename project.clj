@@ -11,6 +11,7 @@
                  [gloss "0.2.6"]
                  [compojure "1.6.1"]
                  [ring/ring-json "0.4.0"]
+                 [ring-cors "0.1.12"]
                  [org.clojure/clojure "1.8.0"]
                  [org.clojure/core.async "0.4.474"]
                  [org.clojure/data.json "0.2.6"]

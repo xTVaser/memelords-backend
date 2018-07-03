@@ -7,9 +7,10 @@
    [com.google.cloud Timestamp])
   (:require
    [clojure.string :as string]
-   [compojure.core :as compojure :refer [GET POST defroutes wrap-routes]]
+   [compojure.core :as compojure :refer [GET POST OPTIONS defroutes wrap-routes]]
    [buddy.hashers :as hashers]
    [buddy.sign.jwt :as jwt]
+   [ring.middleware.cors :refer [wrap-cors]]
    [ring.middleware.params :as params]
    [ring.middleware.json :refer [wrap-json-response]]
    [compojure.route :as route]
@@ -250,9 +251,15 @@
          :headers (add-cors {"content-type" "application/json"})
          :body "Invalid Credentials"}))))
 
+(defn generic-cors [& args]
+  {:status 200
+   :headers (add-cors {"content-type" "application/json"})})
+
 (defroutes view-routes*
   (GET  "/memes"                                []             memes-handler)
-  (GET  "/memes/:id"                            [id :as req]   (memes-handler req id)))
+  (OPTIONS "/memes"                             []             generic-cors)
+  (GET  "/memes/:id"                            [id :as req]   (memes-handler req id))
+  (OPTIONS  "/memes/:id"                            [id :as req]   generic-cors))
 
 (defroutes post-routes*
   (POST "/memes"                                []             publish-meme-handler)
@@ -262,18 +269,23 @@
 (defroutes public-routes*
   (GET  "/resetpassword"                        []             hello-world-handler) ; TODO not implemented yet
   (GET  "/login"                                []             login-handler)
-  (POST "/register"                             []             register-handler))
+  (OPTIONS  "/login"                                []         generic-cors)
+  (POST "/register"                             []             register-handler)
+  (OPTIONS "/register"                             []             generic-cors))
 
 (def app
   (compojure/routes (-> view-routes*
+                        (wrap-cors)
                         (params/wrap-params)
                         (wrap-routes verify-jwt #{"view-memes"})
                         (wrap-json-response))
                     (-> post-routes*
+                        (wrap-cors)
                         (params/wrap-params)
                         (wrap-routes verify-jwt #{"post-memes"})
                         (wrap-json-response))
                     (-> public-routes*
+                        (wrap-cors)
                         (params/wrap-params)
                         (wrap-json-response))
                     (route/not-found "Page Not Found")))
