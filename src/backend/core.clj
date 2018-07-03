@@ -257,9 +257,7 @@
 
 (defroutes view-routes*
   (GET  "/memes"                                []             memes-handler)
-  (OPTIONS "/memes"                             []             generic-cors)
-  (GET  "/memes/:id"                            [id :as req]   (memes-handler req id))
-  (OPTIONS  "/memes/:id"                            [id :as req]   generic-cors))
+  (GET  "/memes/:id"                            [id :as req]   (memes-handler req id)))
 
 (defroutes post-routes*
   (POST "/memes"                                []             publish-meme-handler)
@@ -269,8 +267,10 @@
 (defroutes public-routes*
   (GET  "/resetpassword"                        []             hello-world-handler) ; TODO not implemented yet
   (GET  "/login"                                []             login-handler)
-  (OPTIONS  "/login"                                []         generic-cors)
   (POST "/register"                             []             register-handler)
+  (OPTIONS "/memes"                             []             generic-cors)
+  (OPTIONS  "/memes/:id"                            [id :as req]   generic-cors)
+  (OPTIONS  "/login"                                []         generic-cors)
   (OPTIONS "/register"                             []             generic-cors))
 
 (def app
