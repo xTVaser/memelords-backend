@@ -10,7 +10,6 @@
    [compojure.core :as compojure :refer [GET POST OPTIONS defroutes wrap-routes]]
    [buddy.hashers :as hashers]
    [buddy.sign.jwt :as jwt]
-   [ring.middleware.cors :refer [wrap-cors]]
    [ring.middleware.params :as params]
    [ring.middleware.json :refer [wrap-json-response]]
    [compojure.route :as route]
@@ -275,17 +274,14 @@
 
 (def app
   (compojure/routes (-> view-routes*
-                        (wrap-cors)
                         (params/wrap-params)
                         (wrap-routes verify-jwt #{"view-memes"})
                         (wrap-json-response))
                     (-> post-routes*
-                        (wrap-cors)
                         (params/wrap-params)
                         (wrap-routes verify-jwt #{"post-memes"})
                         (wrap-json-response))
                     (-> public-routes*
-                        (wrap-cors)
                         (params/wrap-params)
                         (wrap-json-response))
                     (route/not-found "Page Not Found")))
